@@ -887,6 +887,16 @@ defmodule Ecto.QueryTest do
         inspect(dynamic([posts], (posts.is_public == true and posts.is_public == true) or posts.is_draft == false))
     end
   end
+
+  describe "unsafe_fragment/1" do
+    test "allows interpolation" do
+      a = "foo"
+      b = "bar"
+      query = from p in "posts", where: unsafe_fragment("date_add(#{a}, #{b})")
+
+      assert [%{expr: {:fragment, [], [{:raw, "date_add(foo, bar)"}]}}] = query.wheres
+    end
+  end
   
   describe "fragment/1" do
     test "raises at runtime when interpolation is not a keyword list" do

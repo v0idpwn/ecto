@@ -79,6 +79,10 @@ defmodule Ecto.Query.BuilderTest do
     end
   end
 
+  test "escape unsafe fragments" do
+    # im leaving this test for a while
+  end
+
   test "escape fragments" do
     assert {Macro.escape(quote do fragment({:raw, "date_add("}, {:expr, &0.created_at()},
                                            {:raw, ", "}, {:expr, ^0}, {:raw, ")"}) end), [{0, :any}]} ==

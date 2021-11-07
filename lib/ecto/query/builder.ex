@@ -139,9 +139,15 @@ defmodule Ecto.Query.Builder do
   end
 
   # fragments
+  def escape({:unsafe_fragment, _, [query]}, _type, params_acc, _vars, _env) do
+    {{:{}, [], [:fragment, [], [{:raw, query}]]}, params_acc}
+  end
+
+  # fragments
   def escape({:fragment, _, [query]}, _type, params_acc, vars, env) when is_list(query) do
     {escaped, params_acc} =
       Enum.map_reduce(query, params_acc, &escape_fragment(&1, :any, &2, vars, env))
+
     {{:{}, [], [:fragment, [], [escaped]]}, params_acc}
   end
 
