@@ -34,7 +34,10 @@ defmodule Ecto.Changeset do
   The difference between them is that most validations can be
   executed without a need to interact with the database and, therefore,
   are always executed before attempting to insert or update the entry
-  in the database. Some validations may happen against the database but
+  in the database. Validations run immediately when a validation function
+  is called on the data that is contained in the changeset at that time.
+
+  Some validations may happen against the database but
   they are inherently unsafe. Those validations start with a `unsafe_`
   prefix, such as `unsafe_validate_unique/3`.
 
@@ -406,14 +409,18 @@ defmodule Ecto.Changeset do
     Enum.reduce(new_changes, {old_changes, errors, valid?}, fn
       {key, value}, {changes, errors, valid?} ->
         put_change(data, changes, errors, valid?, key, value, Map.get(types, key))
+      _, _ ->
+        raise ArgumentError,
+              "invalid changes being applied to changeset. " <>
+                "Expected a keyword list or a map, got: #{inspect(new_changes)}"
     end)
   end
 
   @doc """
-  Applies the given `params` as changes for the given `data` according to
-  the given set of `permitted` keys. Returns a changeset.
+  Applies the given `params` as changes on the `data` according to
+  the set of `permitted` keys. Returns a changeset.
 
-  The given `data` may be either a changeset, a schema struct or a `{data, types}`
+  `data` may be either a changeset, a schema struct or a `{data, types}`
   tuple. The second argument is a map of `params` that are cast according
   to the type information from `data`. `params` is a map with string keys
   or a map with atom keys, containing potentially invalid data. Mixed keys
@@ -565,7 +572,7 @@ defmodule Ecto.Changeset do
     do: {key, Atom.to_string(key)}
 
   defp cast_key(key),
-    do: raise ArgumentError, "cast/3 expects a list of atom keys, got: `#{inspect key}`"
+    do: raise ArgumentError, "cast/3 expects a list of atom keys, got key: `#{inspect key}`"
 
   defp cast_field(key, param_key, type, params, current, empty_values, defaults, valid?) do
     case params do
@@ -1153,7 +1160,7 @@ defmodule Ecto.Changeset do
   Updates a change.
 
   The given `function` is invoked with the change value only if there
-  is a change for the given `key`. Note that the value of the change
+  is a change for `key`. Note that the value of the change
   can still be `nil` (unless the field was marked as required on `validate_required/3`).
 
   ## Examples
@@ -2005,10 +2012,7 @@ defmodule Ecto.Changeset do
   @spec validate_inclusion(t, atom, Enum.t, Keyword.t) :: t
   def validate_inclusion(changeset, field, data, opts \\ []) do
     validate_change changeset, field, {:inclusion, data}, fn _, value ->
-      type =
-        changeset.types
-        |> Map.fetch!(field)
-        |> Ecto.Type.type()
+      type = Map.fetch!(changeset.types, field)
 
       if Ecto.Type.include?(type, value, data),
         do: [],
@@ -2023,6 +2027,8 @@ defmodule Ecto.Changeset do
   If you need to validate if a single value is inside the given enumerable,
   you should use `validate_inclusion/4` instead.
 
+  Type of the field must be array.
+
   ## Options
 
     * `:message` - the message on failure, defaults to "has an invalid entry"
@@ -2036,10 +2042,16 @@ defmodule Ecto.Changeset do
   @spec validate_subset(t, atom, Enum.t, Keyword.t) :: t
   def validate_subset(changeset, field, data, opts \\ []) do
     validate_change changeset, field, {:subset, data}, fn _, value ->
-      {:array, element_type} =
-        changeset.types
-        |> Map.fetch!(field)
-        |> Ecto.Type.type()
+      element_type =
+        case Map.fetch!(changeset.types, field) do
+          {:array, element_type} ->
+            element_type
+
+          type ->
+            # backwards compatibility: custom types use underlying type
+            {:array, element_type} = Ecto.Type.type(type)
+            element_type
+        end
 
       case Enum.any?(value, fn element -> not Ecto.Type.include?(element_type, element, data) end) do
         true -> [{field, {message(opts, "has an invalid entry"), [validation: :subset, enum: data]}}]
@@ -2063,10 +2075,7 @@ defmodule Ecto.Changeset do
   @spec validate_exclusion(t, atom, Enum.t, Keyword.t) :: t
   def validate_exclusion(changeset, field, data, opts \\ []) do
     validate_change changeset, field, {:exclusion, data}, fn _, value ->
-      type =
-        changeset.types
-        |> Map.fetch!(field)
-        |> Ecto.Type.type()
+      type = Map.fetch!(changeset.types, field)
 
       if Ecto.Type.include?(type, value, data), do:
         [{field, {message(opts, "is reserved"), [validation: :exclusion, enum: data]}}], else: []
@@ -2204,11 +2213,21 @@ defmodule Ecto.Changeset do
     validate_change changeset, field, {:number, opts}, fn
       field, value ->
         {message, opts} = Keyword.pop(opts, :message)
+
+        unless valid_number?(value) do
+          raise ArgumentError, "expected field `#{field}` to be a decimal, integer, or float, got: #{inspect(value)}"
+        end
+
         Enum.find_value opts, [], fn {spec_key, target_value} ->
           case Map.fetch(@number_validators, spec_key) do
             {:ok, {spec_function, default_message}} ->
-              validate_number(field, value, message || default_message,
+              unless valid_number?(target_value) do
+                raise ArgumentError, "expected option `#{spec_key}` to be a decimal, integer, or float, got: #{inspect(target_value)}"
+              end
+
+              compare_numbers(field, value, message || default_message,
                               spec_key, spec_function, target_value)
+
             :error ->
               supported_options = @number_validators |> Map.keys() |> Enum.map_join("\n", &"  * #{inspect(&1)}")
 
@@ -2224,23 +2243,30 @@ defmodule Ecto.Changeset do
     end
   end
 
-  defp validate_number(field, %Decimal{} = value, message, spec_key, _spec_function, target_value) do
-    result = Decimal.compare(value, decimal_new(target_value)) |> normalize_compare()
+  defp valid_number?(%Decimal{}), do: true
+  defp valid_number?(other), do: is_number(other)
+
+  defp compare_numbers(field, %Decimal{} = value, message, spec_key, _spec_function, %Decimal{} = target_value) do
+    result = Decimal.compare(value, target_value) |> normalize_compare()
     case decimal_compare(result, spec_key) do
-      true  -> nil
+      true -> nil
       false -> [{field, {message, validation: :number, kind: spec_key, number: target_value}}]
     end
   end
 
-  defp validate_number(field, value, message, spec_key, spec_function, target_value) when is_number(value) do
+  defp compare_numbers(field, value, message, spec_key, spec_function, %Decimal{} = target_value) do
+    compare_numbers(field, decimal_new(value), message, spec_key, spec_function, target_value)
+  end
+
+  defp compare_numbers(field, %Decimal{} = value, message, spec_key, spec_function, target_value) do
+    compare_numbers(field, value, message, spec_key, spec_function, decimal_new(target_value))
+  end
+
+  defp compare_numbers(field, value, message, spec_key, spec_function, target_value) do
     case apply(spec_function, [value, target_value]) do
       true  -> nil
       false -> [{field, {message, validation: :number, kind: spec_key, number: target_value}}]
     end
-  end
-
-  defp validate_number(_field, value, _message, _spec_key, _spec_function, _target_value) do
-    raise ArgumentError, "expected value to be of type Decimal, Integer or Float, got: #{inspect value}"
   end
 
   # TODO: Remove me once we support Decimal 2.0 only
@@ -2371,7 +2397,7 @@ defmodule Ecto.Changeset do
   Applies optimistic locking to the changeset.
 
   [Optimistic
-  locking](http://en.wikipedia.org/wiki/Optimistic_concurrency_control) (or
+  locking](https://en.wikipedia.org/wiki/Optimistic_concurrency_control) (or
   *optimistic concurrency control*) is a technique that allows concurrent edits
   on a single record. While pessimistic locking works by locking a resource for
   an entire transaction, optimistic locking only checks if the resource changed

@@ -465,7 +465,7 @@ defmodule Ecto.Query do
   A dynamic expression can always be interpolated inside another dynamic
   expression and into the constructs described below.
 
-  ## `where`, `having` and a `join`'s `on'
+  ## `where`, `having` and a `join`'s `on`
 
   The `dynamic` macro can be interpolated at the root of a `where`,
   `having` or a `join`'s `on`.
@@ -632,22 +632,22 @@ defmodule Ecto.Query do
 
   We can write it as a join expression:
 
-      set = from(p in Post,
+      subset = from(p in Post,
         where: p.synced == false and
                  (is_nil(p.sync_started_at) or p.sync_started_at < ^min_sync_started_at),
         limit: ^batch_size
       )
 
       Repo.update_all(
-        from(p in Post, join: s in subquery(set), on: s.id == p.id),
+        from(p in Post, join: s in subquery(subset), on: s.id == p.id),
         set: [sync_started_at: NaiveDateTime.utc_now()]
       )
 
   Or as a `where` condition:
 
-      subset = from(p in subset, select: p.id)
+      subset_ids = from(p in subset, select: p.id)
       Repo.update_all(
-        from(p in Post, where: p.id in subquery(subset)),
+        from(p in Post, where: p.id in subquery(subset_ids)),
         set: [sync_started_at: NaiveDateTime.utc_now()]
       )
 
@@ -1705,7 +1705,7 @@ defmodule Ecto.Query do
   If `lock` is used more than once, the last one used takes precedence.
 
   Ecto also supports [optimistic
-  locking](http://en.wikipedia.org/wiki/Optimistic_concurrency_control) but not
+  locking](https://en.wikipedia.org/wiki/Optimistic_concurrency_control) but not
   through queries. For more information on optimistic locking, have a look at
   the `Ecto.Changeset.optimistic_lock/3` function.
 

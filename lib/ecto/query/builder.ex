@@ -95,6 +95,10 @@ defmodule Ecto.Query.Builder do
     escape_with_type(expr, type, params_acc, vars, env)
   end
 
+  def escape({:type, _, [{:coalesce, _, [_ | _]} = expr, type]}, _type, params_acc, vars, env) do
+    escape_with_type(expr, type, params_acc, vars, env)
+  end
+
   def escape({:type, _, [{:field, _, [_ | _]} = expr, type]}, _type, params_acc, vars, env) do
     escape_with_type(expr, type, params_acc, vars, env)
   end
@@ -124,10 +128,11 @@ defmodule Ecto.Query.Builder do
         the first argument of type/2 must be one of:
 
           * interpolations, such as ^value
-          * fields, such as p.foo or field(p)
+          * fields, such as p.foo or field(p, :foo)
           * fragments, such fragment("foo(?)", value)
           * an arithmetic expression (+, -, *, /)
           * an aggregation or window expression (avg, count, min, max, sum, over, filter)
+          * a conditional expression (coalesce)
           * access/json paths (p.column[0].field)
 
         Got: #{Macro.to_string(expr)}
@@ -258,7 +263,7 @@ defmodule Ecto.Query.Builder do
   # literals
   def escape({:<<>>, _, args} = expr, type, params_acc, vars, _env) do
     valid? = Enum.all?(args, fn
-      {:::, _, [left, _]} -> is_integer(left) or is_binary(left)
+      {:"::", _, [left, _]} -> is_integer(left) or is_binary(left)
       left -> is_integer(left) or is_binary(left)
     end)
 
@@ -421,6 +426,11 @@ defmodule Ecto.Query.Builder do
   # Tuple
   def escape({:{}, _, _}, _, _, _, _) do
     error! "Tuples can only be used in comparisons with literal tuples of the same size"
+  end
+
+  # Unecessary parentheses around an expression
+  def escape({:__block__, _, [expr]}, type, params_acc, vars, env) do
+    escape(expr, type, params_acc, vars, env)
   end
 
   # Other functions - no type casting
@@ -683,6 +693,8 @@ defmodule Ecto.Query.Builder do
     do: type
   def validate_type!({:__aliases__, _, _} = type, _vars, env),
     do: Macro.expand(type, get_env(env))
+  def validate_type!({:parameterized, _, _} = type, _vars, _env),
+    do: type
   def validate_type!(type, _vars, _env) when is_atom(type),
     do: type
   def validate_type!({{:., _, [{var, _, context}, field]}, _, []}, vars, _env)
@@ -693,7 +705,8 @@ defmodule Ecto.Query.Builder do
     do: {find_var!(var, vars), field}
 
   def validate_type!(type, _vars, _env) do
-    error! "type/2 expects an alias, atom or source.field as second argument, got: `#{Macro.to_string(type)}`"
+    error! "type/2 expects an alias, atom, initialized parameterized type or " <> 
+           "source.field as second argument, got: `#{Macro.to_string(type)}`"
   end
 
   @always_tagged [:binary]

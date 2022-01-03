@@ -1,9 +1,11 @@
 defmodule Ecto.Integration.TypeTest do
-  use Ecto.Integration.Case, async: Application.get_env(:ecto, :async_integration_tests, true)
+  use Ecto.Integration.Case, async: Application.compile_env(:ecto, :async_integration_tests, true)
 
   alias Ecto.Integration.{Custom, Item, ItemColor, Order, Post, User, Tag, Usec}
   alias Ecto.Integration.TestRepo
   import Ecto.Query
+
+  @parameterized_type Ecto.ParameterizedType.init(Ecto.Enum, values: [:a, :b])
 
   test "primitive types" do
     integer  = 1
@@ -112,7 +114,7 @@ defmodule Ecto.Integration.TypeTest do
   end
 
   test "tagged types" do
-    TestRepo.insert!(%Post{})
+    TestRepo.insert!(%Post{visits: 12})
 
     # Numbers
     assert [1]   = TestRepo.all(from Post, select: type(^"1", :integer))
@@ -127,11 +129,18 @@ defmodule Ecto.Integration.TypeTest do
     uuid = Ecto.UUID.generate()
     assert [^uuid] = TestRepo.all(from Post, select: type(^uuid, Ecto.UUID))
 
+    # Parameterized types
+    assert [:a] = TestRepo.all(from Post, select: type(^"a", ^@parameterized_type))
+
     # Math operations
     assert [4]   = TestRepo.all(from Post, select: type(2 + ^"2", :integer))
     assert [4.0] = TestRepo.all(from Post, select: type(2.0 + ^"2", :float))
     assert [4]   = TestRepo.all(from p in Post, select: type(2 + ^"2", p.visits))
     assert [4.0] = TestRepo.all(from p in Post, select: type(2.0 + ^"2", p.intensity))
+
+    # Comparison expression
+    assert [12] = TestRepo.all(from p in Post, select: type(coalesce(p.visits, 0), :integer))
+    assert [1.0] = TestRepo.all(from p in Post, select: type(coalesce(p.intensity, 1.0), :float))
   end
 
   test "binary id type" do

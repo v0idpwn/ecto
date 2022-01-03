@@ -2,13 +2,13 @@ defmodule Ecto.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/elixir-ecto/ecto"
-  @version "3.7.1"
+  @version "3.8.0-dev"
 
   def project do
     [
       app: :ecto,
       version: @version,
-      elixir: "~> 1.8",
+      elixir: "~> 1.10",
       deps: deps(),
       consolidate_protocols: Mix.env() != :test,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -41,7 +41,7 @@ defmodule Ecto.MixProject do
 
   defp package do
     [
-      maintainers: ["Eric Meadows-Jönsson", "José Valim", "James Fish", "Michał Muskała"],
+      maintainers: ["Eric Meadows-Jönsson", "José Valim", "James Fish", "Michał Muskała", "Felipe Stival"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url},
       files:
@@ -54,7 +54,6 @@ defmodule Ecto.MixProject do
     [
       main: "Ecto",
       source_ref: "v#{@version}",
-      canonical: "http://hexdocs.pm/ecto",
       logo: "guides/images/e.png",
       extra_section: "GUIDES",
       source_url: @source_url,
@@ -112,6 +111,7 @@ defmodule Ecto.MixProject do
   def extras() do
     [
       "guides/introduction/Getting Started.md",
+      "guides/introduction/Embedded Schemas.md",
       "guides/introduction/Testing with Ecto.md",
       "guides/howtos/Aggregates and subqueries.md",
       "guides/howtos/Composable transactions with Multi.md",

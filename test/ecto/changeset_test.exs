@@ -36,25 +36,37 @@ defmodule Ecto.ChangesetTest do
     end
   end
 
-  defmodule CustomSlug do
+  defmodule Email do
     use Ecto.Type
 
     def type, do: :string
-    def cast(val), do: {:ok, val}
-    def load(val), do: {:ok, val}
-    def dump(val), do: {:ok, val}
+    def cast(val) when is_binary(val), do: {:ok, val}
+    def cast(_), do: :error
+    def load(val) when is_binary(val), do: {:ok, val}
+    def load(_), do: :error
+    def dump(val) when is_binary(val), do: {:ok, val}
+    def dump(_), do: :error
+
+    def equal?(email_a, email_b) when is_binary(email_a) and is_binary(email_b) do
+      [username_a, domain_a] = String.split(email_a, "@")
+      [username_b, domain_b] = String.split(email_b, "@")
+
+      [significant_a | _] = String.split(username_a, "+")
+      [significant_b | _] = String.split(username_b, "+")
+
+      significant_a == significant_b && domain_a == domain_b
+    end
+
+    def equal?(a, b), do: a == b
   end
 
-  defmodule CustomTag do
+  defmodule StringArray do
     use Ecto.Type
 
     def type, do: {:array, :string}
-    def cast(val) when is_list(val), do: {:ok, val}
-    def cast(_), do: :error
-    def load(val) when is_list(val), do: {:ok, val}
-    def load(_), do: :error
-    def dump(val) when is_list(val), do: {:ok, val}
-    def dump(_), do: :error
+    def cast(val), do: {:ok, val}
+    def load(val), do: {:ok, val}
+    def dump(val), do: {:ok, val}
   end
 
   defmodule Post do
@@ -63,14 +75,13 @@ defmodule Ecto.ChangesetTest do
     schema "posts" do
       field :token, :integer, primary_key: true
       field :title, :string, default: ""
-      field :slug, CustomSlug
+      field :author_email, Email
       field :body
       field :uuid, :binary_id
       field :color, :binary
       field :decimal, :decimal
       field :upvotes, :integer, default: 0
       field :topics, {:array, :string}
-      field :tags, CustomTag
       field :virtual, :string, virtual: true
       field :published_at, :naive_datetime
       field :source, :map
@@ -95,7 +106,7 @@ defmodule Ecto.ChangesetTest do
   end
 
   defp changeset(schema \\ %Post{}, params) do
-    cast(schema, params, ~w(id token title slug body upvotes decimal color topics tags virtual)a)
+    cast(schema, params, ~w(id token title author_email body upvotes decimal color topics virtual)a)
   end
 
   defmodule CustomError do
@@ -1039,7 +1050,7 @@ defmodule Ecto.ChangesetTest do
     assert changeset.errors == [title: {"yada", [validation: :inclusion, enum: ~w(world)]}]
   end
 
-  test "validate_inclusion/3 with decimal" do
+  test "validate_inclusion/3 with decimal does semantic comparison" do
     changeset =
       {%{}, %{value: :decimal}}
       |> Ecto.Changeset.cast(%{value: 0}, [:value])
@@ -1048,13 +1059,14 @@ defmodule Ecto.ChangesetTest do
     assert changeset.valid?
   end
 
-  test "validate_inclusion/3 with custom type" do
+  test "validate_inclusion/3 with custom type and custom equal function" do
     changeset =
-      changeset(%{"slug" => "foo"})
-      |> validate_inclusion(:slug, ~w(foo))
+      changeset(%{"author_email" => "carl+1@example.com"})
+      |> validate_inclusion(:author_email, ["carl@example.com"])
+
     assert changeset.valid?
     assert changeset.errors == []
-    assert validations(changeset) == [slug: {:inclusion, ~w(foo)}]
+    assert validations(changeset) == [author_email: {:inclusion, ["carl@example.com"]}]
   end
 
   test "validate_subset/3" do
@@ -1078,7 +1090,7 @@ defmodule Ecto.ChangesetTest do
     assert changeset.errors == [topics: {"yada", [validation: :subset, enum: ~w(cat dog)]}]
   end
 
-  test "validate_subset/3 with decimal" do
+  test "validate_subset/3 with decimal does semantic comparison" do
     changeset =
       {%{}, %{value: {:array, :decimal}}}
       |> Ecto.Changeset.cast(%{value: [0, 0.2]}, [:value])
@@ -1087,14 +1099,14 @@ defmodule Ecto.ChangesetTest do
     assert changeset.valid?
   end
 
-  test "validate_subset/3 with custom type" do
+  test "validate_subset/3 with custom type uses underlying type" do
+    # backwards compatibility test
     changeset =
-      changeset(%{"tags" => ["cute", "animals"]})
-      |> validate_subset(:tags, ~w(cute animals))
+      {%{}, %{value: StringArray}}
+      |> Ecto.Changeset.cast(%{value: ["a", "b"]}, [:value])
+      |> validate_subset(:value, ["a", "b"])
 
     assert changeset.valid?
-    assert changeset.errors == []
-    assert validations(changeset) == [tags: {:subset, ~w(cute animals)}]
   end
 
   test "validate_exclusion/3" do
@@ -1118,22 +1130,13 @@ defmodule Ecto.ChangesetTest do
     assert changeset.errors == [title: {"yada", [validation: :exclusion, enum: ~w(world)]}]
   end
 
-  test "validate_exclusion/3 with decimal" do
+  test "validate_exclusion/3 with decimal does semantic comparison" do
     decimals = Enum.map([0.0, 0.2], &Decimal.from_float/1)
     changeset =
       {%{}, %{value: :decimal}}
       |> Ecto.Changeset.cast(%{value: 0}, [:value])
       |> validate_exclusion(:value, decimals)
     assert changeset.errors ==  [value: {"is reserved", [validation: :exclusion, enum: decimals]}]
-  end
-
-  test "validate_exclusion/3 with custom type" do
-    changeset =
-      changeset(%{"slug" => "sun"})
-      |> validate_exclusion(:slug, ~w(moon))
-    assert changeset.valid?
-    assert changeset.errors == []
-    assert validations(changeset) == [slug: {:exclusion, ~w(moon)}]
   end
 
   test "validate_length/3 with string" do
@@ -1350,8 +1353,20 @@ defmodule Ecto.ChangesetTest do
   end
 
   test "validate_number/3 with bad value" do
-    assert_raise ArgumentError, "expected value to be of type Decimal, Integer or Float, got: \"Oops\"", fn ->
+    assert_raise ArgumentError, "expected field `virtual` to be a decimal, integer, or float, got: \"Oops\"", fn ->
       validate_number(changeset(%{"virtual" => "Oops"}), :virtual, greater_than: 0)
+    end
+  end
+
+  test "validate_number/3 with bad target" do
+    # Number value
+    assert_raise ArgumentError, "expected option `greater_than` to be a decimal, integer, or float, got: 0..10", fn ->
+      validate_number(changeset(%{"upvotes" => 11}), :upvotes, greater_than: 0..10)
+    end
+
+    # Decimal value
+    assert_raise ArgumentError, "expected option `greater_than` to be a decimal, integer, or float, got: 0..10", fn ->
+      validate_number(changeset(%{"decimal" => Decimal.new(11)}), :decimal, greater_than: 0..10)
     end
   end
 

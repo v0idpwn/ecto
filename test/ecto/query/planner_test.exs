@@ -981,11 +981,26 @@ defmodule Ecto.Query.PlannerTest do
       normalize(query)
     end
 
+    exception = assert_raise Ecto.QueryError, fn ->
+      query = from(Comment, []) |> select([c], c.postd)
+      normalize(query)
+    end
+
+    assert exception.message =~ "field `postd` in `select` does not exist in schema"
+    assert exception.message =~ "Did you mean one of:"
+    assert exception.message =~ "* `posted`"
+    assert exception.message =~ "* `post_id`"
+
     message = ~r"field `temp` in `select` is a virtual field in schema Ecto.Query.PlannerTest.Comment"
     assert_raise Ecto.QueryError, message, fn ->
       query = from(Comment, []) |> select([c], c.temp)
       normalize(query)
     end
+  end
+
+  test "normalize: allow virtual fields in type/2" do
+    query = from(Comment, []) |> select([c], type(fragment("1"), c.temp))
+    normalize(query)
   end
 
   test "normalize: validate fields in left side of in expressions" do
@@ -1112,7 +1127,7 @@ defmodule Ecto.Query.PlannerTest do
         |> normalize()
       %{queries: [{"cte", query}]} = with_expr
       assert query.sources == {{"comments", Comment, nil}}
-      assert {:&, [], [0]} = query.select.expr
+      assert {:%{}, [], [id: _, text: _] ++ _} = query.select.expr
       assert  [{:id, {{:., _, [{:&, _, [0]}, :id]}, _, []}},
                {:text, {{:., _, [{:&, _, [0]}, :text]}, _, []}},
                _ | _] = query.select.fields
